@@ -1,53 +1,83 @@
-import streamlit as st
 import pandas as pd
-import time
+import yfinance as yf
+import altair as alt
+import streamlit as st
 
-st.title('Streamlit 超入門')
-st.write('DataFrame')
+st.title('米国株価可視化アプリ')
 
-df = pd.DataFrame({
-    '1列目': [1, 2, 3, 4],
-    '2列目': [1, 2, 3, 4]
-})
+st.sidebar.write("""
+# GAFA株価
+こちらは株価可視化ツールです。以下のオプションから表示日数を指定できます。
+""")
 
-df2 = pd.DataFrame({
-    'lat':[35.69],
-    'lon':[139.70]
-    })
+st.sidebar.write("""
+## 表示年数選択
+""")
 
+days = st.sidebar.slider('年数', 1, 5, 10)
 
-st.dataframe(df, width = 100, height=100)
-st.table(df)
-st.line_chart(df)
+st.write(f"""
+### 過去 **{days}年間** のGAFA株価
+""")
 
-if st.checkbox('map'):
-    st.map(df2)
+@st.cache_data
+def get_data(days, tickers):
+    df = pd.DataFrame()
+    for company in tickers.keys():
+        tkr = yf.Ticker(tickers[company])
+        hist = tkr.history(period=f'{days}y')
+#        hist.index = hist.index.strftime('%d %B %Y')
+        hist = hist[['Close']]
+        hist.columns = [company]
+        hist = hist.T
+        hist.index.name = 'Name'
+        df = pd.concat([df, hist])
+    return df
 
-num1 = st.sidebar.selectbox(
-    'select num',
-    list(range(1, 11))
-)
-'選んだ数字は', num1, 'です。'
+try: 
+    st.sidebar.write("""
+    ## 株価の範囲指定
+    """)
+    ymin, ymax = st.sidebar.slider(
+        '範囲を指定してください。',
+        0.0, 800.0, (0.0, 800.0)
+    )
 
-txt1 = st.sidebar.text_input('文字列を入力してください')
-'入力した文字列は', txt1, 'です。'
+    tickers = {
+        'apple': 'AAPL',
+        'amazon': 'AMZN',
+        'google': 'GOOGL',
+        'microsoft': 'MSFT',
+        'netflix': 'NFLX'
+    }
+    df = get_data(days, tickers)
+    companies = st.multiselect(
+        '会社名を選択してください。',
+        list(df.index),
+        ['apple', 'amazon', 'google', 'microsoft', 'netflix']
+    )
 
-num2 = st.sidebar.slider('スライダー', 0, 100, 50)
-'入力した値は', num2, 'です。'
-
-st.write('プログレスバー')
-
-lt = st.empty()
-bar = st.progress(0)
-
-for i in range(100):
-    lt.text(f'{i+1} %')
-    bar.progress(i+1)
-    time.sleep(0.01)
-
-
-""""
-# 章
-## 節
-### 項目
-"""
+    if not companies:
+        st.error('少なくとも一社は選んでください。')
+    else:
+        data = df.loc[companies]
+        st.write("### 株価 (USD)", data.sort_index())
+        data = data.T.reset_index()
+        data = pd.melt(data, id_vars=['Date']).rename(
+            columns={'value': 'Stock Prices(USD)'}
+        )
+        chart = (
+            alt.Chart(data)
+            .mark_line(opacity=0.8, clip=True)
+            .encode(
+                x="Date:T",
+                y=alt.Y("Stock Prices(USD):Q", stack=None, scale=alt.Scale(domain=[ymin, ymax])),
+#                y=alt.Y("Stock Prices(USD):Q", stack=None, scale=alt.Scale(type="log")),
+                color='Name:N'
+            )
+        )
+        st.altair_chart(chart, use_container_width=True)
+except:
+    st.error(
+        "err"
+    )
